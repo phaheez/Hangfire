@@ -35,6 +35,7 @@ namespace HangfireWebAPI.Controllers
 
         /// <summary>
         /// [Fire-and-Forget Jobs]: processed single time e.g for sending welcome email upon sign-up
+        /// executed only once and almost immediately after creation
         /// </summary>
         /// <returns></returns>
         [HttpGet("/FireAndForgetJob")]
@@ -45,8 +46,9 @@ namespace HangfireWebAPI.Controllers
         }
 
         /// <summary>
-        /// [Delayed Jobs]: to be fired after a specified time e.g renew subscription;
-        /// generating monthly discount/reports/invoice
+        /// [Delayed Jobs]: to be fired after a specified time 
+        /// Delayed tasks are those that we surely want to execute, but just not right now. 
+        /// We can schedule them at a certain time, maybe a minute from now or three months from now.
         /// </summary>
         /// <returns></returns>
         [HttpGet("/DelayedJob")]
@@ -58,9 +60,12 @@ namespace HangfireWebAPI.Controllers
 
         /// <summary>
         /// [Recurring Jobs]: occurs in a recursive ways based on timestamp e.g Check for database updates
+        /// repeat in a certain interval.
+        /// e.g renew subscription;
+        /// generating monthly discount/reports/invoice
         /// </summary>
         /// <returns></returns>
-        [HttpGet("/ReccuringJob")]
+        [HttpGet("/RecurringJob")]
         public ActionResult CreateReccuringJob()
         {
             _recurringJobManager.AddOrUpdate("jobId", () => _jobTestService.ReccuringJob(), Cron.Minutely);
@@ -69,6 +74,7 @@ namespace HangfireWebAPI.Controllers
 
         /// <summary>
         /// [Continuations Jobs]: used when there is a change reactions e.g send confirmation email after unsubscribe
+        /// getting two jobs to run one after the other in continuation
         /// </summary>
         /// <returns></returns>
         [HttpGet("/ContinuationJob")]

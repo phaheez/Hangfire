@@ -14,11 +14,16 @@ using System.Threading.Tasks;
 using Hangfire;
 using HangfireWebAPI.Services;
 using Hangfire.SqlServer;
+using Hangfire.Dashboard;
+using HangfireBasicAuthenticationFilter;
 
 namespace HangfireWebAPI
 {
     public class Startup
     {
+        private static IJobTestService jobTestService;
+        private readonly HangfireJobs jobscheduler = new HangfireJobs(jobTestService);
+
         public Startup(IConfiguration configuration)
         {
             Configuration = configuration;
@@ -29,15 +34,28 @@ namespace HangfireWebAPI
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
-            services.AddHangfire(x => x.UseSqlServerStorage(Configuration.GetConnectionString("DefaultConnection"), new SqlServerStorageOptions
+            #region Configure Hangfire
+
+            if (Configuration.GetSection("RunHangfire").Value == "true")
             {
-                CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
-                SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5),
-                QueuePollInterval = TimeSpan.Zero,
-                UseRecommendedIsolationLevel = true,
-                DisableGlobalLocks = true
-            }));
-            services.AddHangfireServer();
+                var connString = Configuration.GetConnectionString("DefaultConnection");
+                services.AddHangfire(x => x.UseSqlServerStorage(connString, new SqlServerStorageOptions
+                {
+                    CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
+                    SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5),
+                    QueuePollInterval = TimeSpan.Zero,
+                    UseRecommendedIsolationLevel = true,
+                    DisableGlobalLocks = true
+                }));
+                
+                //Hangfire Retention Time(default=24hrs)
+                GlobalConfiguration.Configuration.UseSqlServerStorage(connString).WithJobExpirationTimeout(TimeSpan.FromDays(7));
+                
+                services.AddHangfireServer();
+            }
+
+            #endregion
+
             services.AddControllers();
             services.AddScoped<IJobTestService, JobTestService>();
             services.AddSwaggerGen(c =>
@@ -47,14 +65,14 @@ namespace HangfireWebAPI
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env, IRecurringJobManager recurringJobManager)
         {
             if (env.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
-                app.UseSwagger();
-                app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "HangfireWebAPI v1"));
             }
+            app.UseSwagger();
+            app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "HangfireWebAPI v1"));
 
             app.UseHttpsRedirection();
 
@@ -62,13 +80,33 @@ namespace HangfireWebAPI
 
             app.UseAuthorization();
 
-            app.UseHangfireDashboard("/hangfire");
-            //app.UseHangfireDashboard("/hangfire", new DashboardOptions
-            //{
-            //    Authorization = new []{ new HangireAuthorizationFilter()}
-            //});
+            #region Configure Hangfire
 
-            //RecurringJob.AddOrUpdate<IHangfireService>(x=>x.RunService(), "* * * * *");
+            if (Configuration.GetSection("RunHangfire").Value == "true")
+            {
+                var hangfireUsername = Configuration.GetSection("HangfireCredentials:UserName").Value;
+                var hangfirePassword = Configuration.GetSection("HangfireCredentials:Password").Value;
+
+                app.UseHangfireDashboard("/hangfire", new DashboardOptions
+                {
+                    AppPath = null,
+                    DashboardTitle = "Hangfire Dashboard",
+                    //IgnoreAntiforgeryToken = true,
+                    IsReadOnlyFunc = (DashboardContext context) => true,
+                    //Authorization = new[] { new HangfireCustomBasicAuthenticationFilter { User = hangfireUsername, Pass = hangfirePassword } }
+                    Authorization = new[] { new HangireAuthorizationFilter() }
+                });
+            }
+
+            #endregion
+
+            #region Job Scheduling Tasks
+
+            //RecurringJob.AddOrUpdate<IJobTestService>(x => x.FireAndForgetJob(), "5 * * * * *");
+            // Recurring Job for every 10 secs
+            recurringJobManager.AddOrUpdate("Insert Employee: Runs Every 10 secs", () => jobscheduler.RunHangfireJob(), "10 * * * * *");
+
+            #endregion
 
             app.UseEndpoints(endpoints =>
             {
